@@ -1,24 +1,24 @@
 var runTest = `
 bool runTest(int testNum, {{inputs}}, {{outputType}} expected) {
-  Solution *sol = new Solution();
-  clock_t startTime = clock();
-  {{outputType}} answer = sol->{{funcName}}({{inputArgs}});
-  clock_t endTime = clock();
-  delete sol;
-  cout << "[ Test " << testNum << " ]" << endl;
-  cout << "Execution time: " << double(endTime - startTime) / CLOCKS_PER_SEC << " seconds" << endl;
-  cout << "Expected: "{{printExpected}}
-  cout << "Received: "{{printAnswer}}
-  cout << "Result: ";
-  if (double(endTime - startTime) / CLOCKS_PER_SEC >= 1) {
-    cout << "Time limited exceeded" << endl;
-  } else if (answer != expected) {
-    cout << "Wrong Answer" << endl;
-  } else {
-    cout << "Correct!" << endl << endl;
-    return true;
-  }
-  cout << endl;
-  return false;
+\tSolution *sol = new Solution();
+\tclock_t startTime = clock();
+\t{{outputType}} answer = sol->{{funcName}}({{inputArgs}});
+\tclock_t endTime = clock();
+\tdelete sol;
+\tcout << "[ Test " << testNum << " ]" << endl;
+\tcout << "Execution time: " << double(endTime - startTime) / CLOCKS_PER_SEC << " seconds" << endl;
+\tcout << "Expected: "{{printExpected}}
+\tcout << "Received: "{{printAnswer}}
+\tcout << "Result: ";
+\tif (double(endTime - startTime) / CLOCKS_PER_SEC >= 1) {
+\t\tcout << "Time limited exceeded" << endl;
+\t} else if (answer != expected) {
+\t\tcout << "Wrong Answer" << endl;
+\t} else {
+\t\tcout << "Correct!" << endl << endl;
+\t\treturn true;
+\t}
+\tcout << endl;
+\treturn false;
 }
 `;
