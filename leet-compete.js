@@ -2,19 +2,13 @@
 
 let solutionTemplate;
 
+let templateClassName = '';
 let funcArr = [];
 
-let inputs;
-let variables = [];
-let outputType = '';
-let funcName = '';
-
 let codeSelector = '.ace_content';
-let printExpected = '';
-let printAnswer = '';
 
-let regexInput = /Input:((?:.|\n)*)Output/i;
-let regexOutput = /Output:[\s\n]*(\S+)[\s\n]+(?:Explanation|$)/i;
+let regexInput = '';
+let regexOutput = '';
 
 let regexBool = '(true|false|0|1)';
 let regexInt = '-?\\d+';
@@ -33,13 +27,17 @@ const PROBLEM_TYPE = {
 
 function isSupportedType(type) {
   let supportedTypes = ['bool', 'int', 'long long', 'float', 'double', 'string'];
-  if (supportedTypes.indexOf(type) != -1) {
+  if (supportedTypes.indexOf(type) !== -1) {
     return true;
   }
   if (type.match(regexVectorType) != null) {
     return true;
   }
   return false;
+}
+
+function removeReference(s) {
+  return s.replace(/&/g, '');
 }
 
 class Func {
@@ -50,7 +48,13 @@ class Func {
 		this.variables = variables;
 		this.startIndex = startIndex;
 		this.endIndex = endIndex;
+		this.printExpected = '';
+		this.printAnswer = '';
+		if (outputType === 'void') {
+		  this.outputType = null;
+    }
 	}
+
 	static parseFunction (strTemplate, startIndex) {
 		let funcMatch = strTemplate.substr(startIndex).match(/\s+(.*)\((.*)\)\s*\{/);
 		if (funcMatch == null) {
@@ -91,6 +95,124 @@ class Func {
 		}
 		return new Func(funcName, outputType, inputs, variables, startIndex, endIndex);
 	}
+
+  getInput(input) {
+    let regex = '';
+    for (let i = 0; i < this.variables.length; i++) {
+      let name = this.variables[i].name;
+      let type = this.variables[i].type;
+      regex += '(?:' + name + '[\\s\\n]*[=:][\\s\\n]*)?';
+      switch (true) {
+        case type === 'bool':
+          regex += '(' + regexBool + ')';
+          break;
+        case type === 'int' || type === 'long long':
+          regex += '(' + regexInt + ')';
+          break;
+        case type === 'float' || type === 'double':
+          regex += '(' + regexFloat + ')';
+          break;
+        case type === 'string':
+          regex += '(' + regexString + ')';
+          break;
+        case type.match(regexVectorType) != null:
+          regex += '(' + regexVector + ')';
+          break;
+      }
+      regex += '[\\s\\n,;]*';
+    }
+    let result = [];
+    let matched = input.match(RegExp(regex, 'i'));
+    if (matched == null) {
+      error('getInput exception');
+      return [];
+    }
+    for (let i = 0; i < this.variables.length; i++) {
+      let content = matched[i + 1];
+      if (this.variables[i].isVector) {
+        content = content.replace(/\[/g, '{');
+        content = content.replace(/\]/g, '}');
+      }
+      result.push(this.variables[i].name + ' = ' + content + ';');
+    }
+    return result;
+  }
+
+  getOutput(output) {
+    let value = '';
+    let isVector = false;
+    switch (true) {
+      case this.outputType === 'bool':
+        value = output.match(RegExp(regexBool, 'i'))[0].toLowerCase();
+        break;
+      case this.outputType === 'int' || this.outputType === 'long long':
+        value = output.match(RegExp(regexInt, 'i'))[0];
+        break;
+      case this.outputType === 'float' || this.outputType === 'double':
+        value = output.match(RegExp(regexFloat, 'i'))[0];
+        break;
+      case this.outputType === 'string':
+        value = output.match(RegExp(regexString, 'i'))[0];
+        break;
+      case this.outputType === 'char':
+        value = output.match(RegExp(regexString, 'i'))[0];
+        value = "'" + value[1] + "'";
+        break;
+      case this.outputType && this.outputType.match(RegExp(regexVectorType, 'i')) != null:
+        isVector = true;
+        value = output.match(regexCapture)[1];
+        break;
+    }
+    let result = [];
+    if (!isVector) {
+      result.push('expected = ' + value + ';');
+    } else {
+      let vectorType = this.outputType.match(regexVectorType)[1];
+      result.push(vectorType + ' outVec[] = {' + value + '};');
+      result.push('expected.assign(outVec, outVec + sizeof(outVec) / sizeof(outVec[0]));');
+    }
+    return result;
+  }
+
+  genPrintExpected() {
+    if (this.outputType && this.outputType.match(regexVectorType) != null) {
+      // Output is vector
+      this.printExpected = ' << "{ ";\n';
+      this.printExpected += '\tfor (int i = 0; i < expected.size(); i++) {\n';
+      this.printExpected += '\t\tcout << expected[i] << (i == (int)expected.size() - 1 ? " }\\n" : ", ");\n';
+      this.printExpected += '\t}';
+      this.printAnswer = this.printExpected.replace(/expected/g, 'answer');
+    } else {
+      // Output is regular variable.
+      this.printExpected = ' << expected << endl;';
+      this.printAnswer = ' << answer << endl;';
+    }
+  }
+
+  getInputArgs() {
+	  return this.variables.map(function(v) { return v.name; });
+  }
+
+  getVarDeclaration() {
+	  let code = '';
+    for (let i = 0; i < this.variables.length; i++) {
+      code += '\t' + removeReference(this.variables[i].type) + ' ' + this.variables[i].name + ';\n';
+    }
+    code += '\t' + this.outputType + ' expected;\n';
+    return code;
+  }
+
+  getRunTest(runTest) {
+    runTest = runTest.replace(/{{className}}/g, templateClassName);
+    runTest = runTest.replace(/{{inputs}}/g, this.inputs);
+    runTest = runTest.replace(/{{outputType}}/g, this.outputType);
+    runTest = runTest.replace(/{{funcName}}/g, this.funcName);
+    runTest = runTest.replace(/{{inputArgs}}/g, this.getInputArgs().join(', '));
+    runTest = runTest.replace(/{{printExpected}}/g, this.printExpected);
+    runTest = runTest.replace(/{{printAnswer}}/g, this.printAnswer);
+    return runTest;
+  }
+
 }
 
 function parseSolutionTemplate() {
@@ -98,7 +220,6 @@ function parseSolutionTemplate() {
   solutionTemplate = '';
   $('.CodeMirror-line').each(function(index, element) {
     solutionTemplate += $(element).text() + '\n';
-    // console.log("--- solutionTemplate step", element);
   });
 
   if (solutionTemplate.match(/struct TreeNode/) != null) {
@@ -108,6 +229,7 @@ function parseSolutionTemplate() {
 
   solutionTemplate = solutionTemplate.replace(/\/\*\*(.|\n)*\*\/\n/g, '');
   solutionTemplate = solutionTemplate.replace(/\u00A0/g, ' ');
+  solutionTemplate = solutionTemplate.replace(/\u200B/g, '');
   solutionTemplate = solutionTemplate.replace(/    /g, '\t');
 
   // Parse class
@@ -115,7 +237,7 @@ function parseSolutionTemplate() {
   if (classNameMatch == null) {
     return PROBLEM_TYPE.UNKNOWN;
   }
-  let className = classNameMatch[1];
+  templateClassName = classNameMatch[1];
 
   // Parse function
   let publicMatch = solutionTemplate.match(/public:/);
@@ -132,209 +254,191 @@ function parseSolutionTemplate() {
     return PROBLEM_TYPE.UNKNOWN;
   }
 
-  inputs = funcArr[0].inputs;
-  variables = funcArr[0].variables;
-  outputType =  funcArr[0].outputType;
-  funcName =  funcArr[0].funcName;
-
-  if (className === "Solution") {
+  if (templateClassName === "Solution") {
     problemType = PROBLEM_TYPE.GENERAL;
-  } else if (className === funcArr[0].funcName) {
+  } else if (templateClassName === funcArr[0].funcName) {
     problemType = PROBLEM_TYPE.IMPLEMENT_CLASS;
   } else {
     return PROBLEM_TYPE.UNKNOWN;
   }
 
-
-  if (outputType.match(regexVectorType) != null) {
-    // Output is vector
-    printExpected = ' << "{ ";\n';
-    printExpected += '\tfor (int i = 0; i < expected.size(); i++) {\n';
-    printExpected += '\t\tcout << expected[i] << (i == (int)expected.size() - 1 ? " }\\n" : ", ");\n';
-    printExpected += '\t}';
-    printAnswer = printExpected.replace(/expected/g, 'answer');
-  } else {
-    // Output is regular variable.
-    printExpected = ' << expected << endl;';
-    printAnswer = ' << answer << endl;';
-  }
+  funcArr[0].genPrintExpected();
   return problemType;
 }
 
-function getVector(variable, input) {
-  let elementType = variable.type.match(/vector<\s*(.*)\s*>/)[1];
-  let result = [];
-  result.push(elementType + ' vec[] = { ' + input.match(/\[(.*)\]/i)[1] + ' };');
-  result.push(variable.name + '.assign(vec, vec + sizeof(vec) / sizeof(vec[0]));');
-  return result;
-}
-
-function getInput(input) {
-  let regex = '';
-  for (let i = 0; i < variables.length; i++) {
-    let name = variables[i].name;
-    let type = variables[i].type;
-    regex += '(?:' + name + '[\\s\\n]*[=:][\\s\\n]*)?';
-    switch (true) {
-      case type == 'bool':
-        regex += '(' + regexBool + ')';
-        break;
-      case type == 'int' || type == 'long long':
-        regex += '(' + regexInt + ')';
-        break;
-      case type == 'float' || type == 'double':
-        regex += '(' + regexFloat + ')';
-        break;
-      case type == 'string':
-        regex += '(' + regexString + ')';
-        break;
-      case type.match(regexVectorType) != null:
-        regex += '(' + regexVector + ')';
-        break;
-    }
-    regex += '[\\s\\n,;]*';
-  }
-  let result = [];
-  let matched = input.match(RegExp(regex, 'i'));
-  if (matched == null) {
-    error('getInput exception');
-    return [];
-  }
-  for (let i = 0; i < variables.length; i++) {
-    let content = matched[i + 1];
-    if (!variables[i].isVector) {
-      result.push(variables[i].name + ' = ' + content + ';');
-    } else {
-      result = result.concat(getVector(variables[i], content));
-    }
-  }
-  return result;
-}
-
-function getOutput(output) {
-  // console.log("--- output", output);
-  let value = '';
-  let isVector = false;
-  switch (true) {
-    case outputType == 'bool':
-      value = output.match(RegExp(regexBool, 'i'))[0].toLowerCase();
-      break;
-    case outputType == 'int' || outputType == 'long long':
-      value = output.match(RegExp(regexInt, 'i'))[0];
-      break;
-    case outputType == 'float' || outputType == 'double':
-      value = output.match(RegExp(regexFloat, 'i'))[0];
-      break;
-    case outputType == 'string':
-      value = output.match(RegExp(regexString, 'i'))[0];
-      break;
-    case outputType == 'char':
-      value = output.match(RegExp(regexString, 'i'))[0];
-      value = "'" + value[1] + "'";
-      break;
-    case outputType.match(RegExp(regexVectorType, 'i')) != null:
-      isVector = true;
-      value = output.match(regexCapture)[1];
-      break;
-  }
-  let result = [];
-  if (!isVector) {
-    result.push('expected = ' + value + ';');
-  } else {
-    let vectorType = outputType.match(regexVectorType)[1];
-    result.push(vectorType + ' outVec[] = {' + value + '};');
-    result.push('expected.assign(outVec, outVec + sizeof(outVec) / sizeof(outVec[0]));');
-  }
-  return result;
-}
-
-function findVariables(testNum, content) {
+function parseSampleCase(content) {
   let input = content.match(regexInput);
   let output = content.match(regexOutput);
-  // console.log("--- findVariables", content, input, output);
   if (input == null || output == null) {
     return null;
   }
-  input = input[1];
-  output = output[1];
   return {
-   input: getInput(input),
-   output: getOutput(output)
+    input: input[1].trim(),
+    output: output[1].trim()
   };
 }
 
-function removeReference(s) {
-  return s.replace(/&/g, '');
-}
-
 function ready() {
+  regexInput = /Input[:]?((?:.|\n)*)Output/i;
+  regexOutput = /Output[:]?[\s\n]*([\S ]+)[\s\n]+(?:Explanation)?/i;
   if (location.host.indexOf("leetcode.cn") !== -1) {
-    regexInput = /输入[：:]((?:.|\n)*)输出/i;
-    regexOutput = /输出[：:][\s\n]*(\S+)[\s\n]+(?:解释|$)/i;
+    regexInput = /输入[：:]?((?:.|\n)*)输出/i;
+    regexOutput = /输出[：:]?[\s\n]*([\S ]+)[\s\n]+(?:解释)?/i;
   }
 }
 
 function process() {
   let problemType = parseSolutionTemplate()
-  switch (problemType) {
-    case PROBLEM_TYPE.GENERAL:
-      processGeneral();
-      break;
-    case PROBLEM_TYPE.IMPLEMENT_CLASS:
-      break;
-  }
-}
-
-function processGeneral() {
-  let inputArgs = variables.map(function(v) {
-    return v.name;
-  });
 
   let finalCode = headerTemplate + '\n' + solutionTemplate + '\n';
 
-  runTest = runTest.replace('{{inputs}}', funcArr[0].inputs);
-  runTest = runTest.replace('{{outputType}}', funcArr[0].outputType);
-  runTest = runTest.replace('{{funcName}}', funcArr[0].funcName);
-  runTest = runTest.replace('{{inputArgs}}', inputArgs.join(', '));
-  runTest = runTest.replace('{{outputType}}', outputType);
-  runTest = runTest.replace('{{printExpected}}', printExpected);
-  runTest = runTest.replace('{{printAnswer}}', printAnswer);
-
-  finalCode += runTest + '\n';
-
-  finalCode += 'int main() {\n'; // Start testing main function
-  finalCode += '\tbool allSuccess = true;\n'
-
-  for (let i = 0; i < variables.length; i++) {
-    finalCode += '\t' + removeReference(variables[i].type) + ' ' + variables[i].name + ';\n';
+  switch (problemType) {
+    case PROBLEM_TYPE.GENERAL:
+      finalCode += genCodeGeneral();
+      break;
+    case PROBLEM_TYPE.IMPLEMENT_CLASS:
+      finalCode += genCodeImplementClass();
+      break;
   }
-  finalCode += '\t' + outputType + ' expected;\n';
+
+  finalCode += '\tif (!allSuccess) cout << "Some cases did not pass." << endl;\n';
+  finalCode += '\telse cout << "All samples succeeded! :)" << endl;\n';
+  finalCode += '\treturn 0;\n}\n'; // end testing main function
+
+  $('<pre id="leet-compete-code"></pre>').text(finalCode)
+    .insertAfter('.question-content').hide();
+}
+
+function genCodeGeneral() {
+  let codeContent = '';
+  codeContent += funcArr[0].getRunTest(runTest) + '\n';
+
+  codeContent += 'int main() {\n'; // Start testing main function
+  codeContent += '\tbool allSuccess = true;\n'
+  codeContent += funcArr[0].getVarDeclaration();
 
   let testNum = 0;
   $('.question-content > pre').each(function(index, pre) {
-    let inout = findVariables(testNum, $(pre).text());
+    let inout = parseSampleCase($(pre).text());
     if (inout) {
       testNum++;
       let testBlock = '\t{\n';
-      testBlock += '\t\t' + inout.input.join('\n\t\t') + '\n';
-      testBlock += '\t\t' + inout.output.join('\n\t\t') + '\n';
-      testBlock += '\t\tbool success = runTest(' + testNum + ', ' + inputArgs.join(', ') + ', expected);\n';
+      testBlock += '\t\t' + funcArr[0].getInput(inout.input).join('\n\t\t') + '\n';
+      testBlock += '\t\t' + funcArr[0].getOutput(inout.output).join('\n\t\t') + '\n';
+      testBlock += '\t\tbool success = runTest(' + testNum + ', ' + funcArr[0].getInputArgs().join(', ') + ', expected);\n';
       testBlock += '\t\tallSuccess &= success;\n';
       testBlock += '\t}\n';
 
-      finalCode += testBlock;
+      codeContent += testBlock;
     }
   });
   if (testNum === 0) {
     error('Failed to parse sample case');
   }
-  
-  finalCode += '\tif (!allSuccess) cout << "Some cases did not pass." << endl;\n';
-  finalCode += '\telse cout << "All samples succeeded! :)" << endl;\n';
-  finalCode += '\treturn 0;\n}\n'; // end testing main function
-  
-  $('<pre id="leet-compete-code"></pre>').text(finalCode)
-    .insertAfter('.question-content').hide();
+  return codeContent;
+}
+
+function parseVector(input) {
+  input = input.trim();
+  if (input === '') return null;
+  let cnt = 0;
+  let start = 0;
+  let result = [];
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] === '[') {
+      cnt++;
+      if (cnt === 1) {
+        start = i+1;
+      }
+    } else if (input[i] === ']') {
+      cnt--;
+      if (cnt === 0) {
+        let subRes = parseVector(input.substr(start, i - start));
+        if (subRes != null) {
+          result.push(subRes);
+        }
+      }
+    }
+  }
+  if (result.length === 0) {
+    return input.split(/\s*,\s*/);
+  }
+  return result
+}
+
+function getFuncRunCode(func, inputArgs, expected, is_constructor) {
+    let codeContent = '\t{\n';
+    for (let i = 0; i < inputArgs.length; i++) {
+      let v = func.variables[i];
+      if (v.isVector) {
+        codeContent += '\t\t' + removeReference(v.type) + ' ' + v.name + ' = {' + inputArgs[i] + '};\n';
+      }
+    }
+    codeContent += '\t\t';
+    if (is_constructor) {
+      codeContent += 'sol = new ';
+    } else if (func.outputType) {
+      codeContent += removeReference(func.outputType) + ' answer = sol->';
+    } else {
+      codeContent += 'sol->';
+    }
+    codeContent += func.funcName + '(';
+    for (let i = 0; i < inputArgs.length; i++) {
+      if (i) codeContent += ', ';
+      let v = func.variables[i];
+      codeContent += (v.isVector ? v.name : inputArgs[i]);
+    }
+    codeContent += ');\n';
+    if (func.outputType) {
+      codeContent += '\t\t' + removeReference(func.outputType) + ' expected = ' + expected + ';\n';
+      codeContent += '\t\tcout << "Expected: " << answer << endl;\n';
+      codeContent += '\t\tcout << "Received: " << expected << endl;\n';
+      codeContent += '\t\tcout << "Result: ";\n';
+      codeContent += '\t\tbool success = true;\n';
+      codeContent += '\t\tif (answer != expected) {\n';
+      codeContent += '\t\t\tcout << "Wrong Answer" << endl << endl;\n';
+      codeContent += '\t\t\tsuccess = false;\n';
+      codeContent += '\t\t} else {\n';
+      codeContent += '\t\t\tcout << "Correct!" << endl << endl;\n';
+      codeContent += '\t\t}\n';
+      codeContent += '\t\tallSuccess &= success;\n';
+    }
+    codeContent += '\t}\n';
+    return codeContent;
+}
+
+function parseInputImplementClass(inout) {
+  let inputArr = parseVector(inout.input);
+  let outputArr = parseVector(inout.output);
+  if (inputArr.length !== 2 || inputArr[0].length !== inputArr[1].length) {
+    return '';
+  }
+  let funcDict = {};
+  for (let i = 0; i < funcArr.length; i++) {
+    let func = funcArr[i];
+    funcDict[func.funcName] = func;
+  }
+  let codeContent = '';
+  for (let i = 0; i < inputArr[0].length; i++) {
+    let funcName = inputArr[0][i].replace(/"/g, '');
+    codeContent += getFuncRunCode(funcDict[funcName], inputArr[1][i], outputArr[0][i], i === 0);
+  }
+  return codeContent;
+}
+
+function genCodeImplementClass() {
+  let codeContent = '';
+  codeContent += 'int main() {\n'; // Start testing main function
+  codeContent += '\tbool allSuccess = true;\n'
+
+  codeContent += '\t' + templateClassName + '* sol;\n';
+  $('.question-content > pre').each(function(index, pre) {
+    let inout = parseSampleCase($(pre).text());
+    if (inout) {
+      codeContent += parseInputImplementClass(inout);
+    }
+  });
+  return codeContent;
 }
 
 ready();

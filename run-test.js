@@ -1,6 +1,6 @@
 var runTest = `
 bool runTest(int testNum, {{inputs}}, {{outputType}} expected) {
-\tSolution *sol = new Solution();
+\t{{className}} *sol = new {{className}}();
 \tclock_t startTime = clock();
 \t{{outputType}} answer = sol->{{funcName}}({{inputArgs}});
 \tclock_t endTime = clock();
