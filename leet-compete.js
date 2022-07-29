@@ -76,9 +76,12 @@ class Func {
     }
 
 		// Parse input variables
-    let inputs = funcMatch[2];
+    let inputs = funcMatch[2].trim();
 		let varsArr = funcMatch[2].trim().split(/\s*,\s*/);
 		let variables = [];
+		if (inputs === '') {
+		  return new Func(funcName, outputType, inputs, variables, startIndex, endIndex);
+    }
 		for (let i = 0; i < varsArr.length; i++) {
 			let v = varsArr[i];
 			let tokens = v.split(/\s+/);
@@ -356,6 +359,8 @@ function parseVector(input) {
         let subRes = parseVector(input.substr(start, i - start));
         if (subRes != null) {
           result.push(subRes);
+				} else {
+					result.push([]);
         }
       }
     }
@@ -443,4 +448,4 @@ function genCodeImplementClass() {
 
 ready();
 process();
-addButtons();
+addButtons(process);

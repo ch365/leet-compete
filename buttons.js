@@ -29,7 +29,19 @@ function addToggleButton() {
     .insertAfter('#leet-compete-code');
 }
 
-function addButtons() {
+function addReloadButton(process) {
+  $('<a>reload</a>')
+    .addClass('btn btn-default')
+    .css('margin', '10px 0')
+    .on('click', function() {
+      // $('#leet-compete-code').toggle();
+      process();
+    })
+    .insertAfter('#leet-compete-code');
+}
+
+function addButtons(process) {
+  addReloadButton(process);
   addCopyButton();
   addToggleButton();
 }
