@@ -472,8 +472,11 @@ if (isContestPage) {
   process();
   addButtons(process);
 } else {
-  setTimeout(function() {
-    process();
-    addButtons(process);
-  }, 9000);
+  let handle = setInterval(function() {
+    if ($(insertSelector).length && $(codeSelector).length && $(sampleSelector).length) {
+      clearInterval(handle);
+      process();
+      addButtons(process);
+    }
+  }, 500);
 }
