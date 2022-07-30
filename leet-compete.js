@@ -5,7 +5,10 @@ let solutionTemplate;
 let templateClassName = '';
 let funcArr = [];
 
-let codeSelector = '.ace_content';
+let isContestPage = true;
+let insertSelector = '';
+let codeSelector = '';
+let sampleSelector = '';
 
 let regexInput = '';
 let regexOutput = '';
@@ -24,6 +27,24 @@ const PROBLEM_TYPE = {
   "GENERAL": 1,
   "IMPLEMENT_CLASS": 2,
 };
+
+function ready() {
+  insertSelector = '.question-content';
+  codeSelector = '.CodeMirror-line';
+  sampleSelector = '.question-content > pre';
+  regexInput = /Input[:]?((?:.|\n)*)Output/i;
+  regexOutput = /Output[:]?[\s\n]*([\S ]+)[\s\n]*(?:Explanation)?/i;
+  if (location.host.indexOf("leetcode.cn") !== -1) {
+    regexInput = /输入[：:]?((?:.|\n)*)输出/i;
+    regexOutput = /输出[：:]?[\s\n]*([\S ]+)[\s\n]*(?:解释)?/i;
+  }
+  if (location.href.indexOf("/contest/") === -1) {
+    isContestPage = false;
+    insertSelector = '.css-1rngd9y-ZoomWrapper';
+    codeSelector = '.monaco-mouse-cursor-text';
+    sampleSelector = '.notranslate > pre';
+  }
+}
 
 function isSupportedType(type) {
   let supportedTypes = ['bool', 'int', 'long long', 'float', 'double', 'string'];
@@ -221,9 +242,14 @@ class Func {
 function parseSolutionTemplate() {
   let problemType = PROBLEM_TYPE.UNKNOWN;
   solutionTemplate = '';
-  $('.CodeMirror-line').each(function(index, element) {
+  $(codeSelector).each(function(index, element) {
     solutionTemplate += $(element).text() + '\n';
   });
+  if (!isContestPage) {
+    solutionTemplate = solutionTemplate.replace('public:', 'public:\n');
+    solutionTemplate = solutionTemplate.replace(/\{/g, '{\n');
+    solutionTemplate = solutionTemplate.replace(/\}/g, '}\n');
+  }
 
   if (solutionTemplate.match(/struct TreeNode/) != null) {
     error('Problems with TreeNode are not yet supported.');
@@ -234,6 +260,10 @@ function parseSolutionTemplate() {
   solutionTemplate = solutionTemplate.replace(/\u00A0/g, ' ');
   solutionTemplate = solutionTemplate.replace(/\u200B/g, '');
   solutionTemplate = solutionTemplate.replace(/    /g, '\t');
+  if (!isContestPage) {
+    solutionTemplate = solutionTemplate.replace(/\}\n\t\t/g, '}\n\t');
+    solutionTemplate = solutionTemplate.replace(/\{\n\t\t\t/g, '{\n\t');
+  }
 
   // Parse class
   let classNameMatch = solutionTemplate.match(/^class\s+(\S+)/);
@@ -281,15 +311,6 @@ function parseSampleCase(content) {
   };
 }
 
-function ready() {
-  regexInput = /Input[:]?((?:.|\n)*)Output/i;
-  regexOutput = /Output[:]?[\s\n]*([\S ]+)[\s\n]+(?:Explanation)?/i;
-  if (location.host.indexOf("leetcode.cn") !== -1) {
-    regexInput = /输入[：:]?((?:.|\n)*)输出/i;
-    regexOutput = /输出[：:]?[\s\n]*([\S ]+)[\s\n]+(?:解释)?/i;
-  }
-}
-
 function process() {
   let problemType = parseSolutionTemplate()
 
@@ -309,7 +330,7 @@ function process() {
   finalCode += '\treturn 0;\n}\n'; // end testing main function
 
   $('<pre id="leet-compete-code"></pre>').text(finalCode)
-    .insertAfter('.question-content').hide();
+    .insertAfter(insertSelector).hide();
 }
 
 function genCodeGeneral() {
@@ -321,7 +342,7 @@ function genCodeGeneral() {
   codeContent += funcArr[0].getVarDeclaration();
 
   let testNum = 0;
-  $('.question-content > pre').each(function(index, pre) {
+  $(sampleSelector).each(function(index, pre) {
     let inout = parseSampleCase($(pre).text());
     if (inout) {
       testNum++;
@@ -437,7 +458,7 @@ function genCodeImplementClass() {
   codeContent += '\tbool allSuccess = true;\n'
 
   codeContent += '\t' + templateClassName + '* sol;\n';
-  $('.question-content > pre').each(function(index, pre) {
+  $(sampleSelector).each(function(index, pre) {
     let inout = parseSampleCase($(pre).text());
     if (inout) {
       codeContent += parseInputImplementClass(inout);
@@ -447,5 +468,12 @@ function genCodeImplementClass() {
 }
 
 ready();
-process();
-addButtons(process);
+if (isContestPage) {
+  process();
+  addButtons(process);
+} else {
+  setTimeout(function() {
+    process();
+    addButtons(process);
+  }, 9000);
+}

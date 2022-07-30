@@ -3,7 +3,7 @@ function addCopyButton() {
     .appendTo('body')
     .hide();
   $('<a>Copy LeetCompete Source</a>')
-    .addClass('btn btn-default')
+    .addClass('btn btn-default css-ftn10w-BaseButtonComponent')
     .css('margin', '10px 5px')
     .on('click', function() {
       textarea.show(); // Copy fails when textarea is invisible.
@@ -21,7 +21,7 @@ function addCopyButton() {
 
 function addToggleButton() {
   $('<a>Toggle LeetCompete Source</a>')
-    .addClass('btn btn-default')
+    .addClass('btn btn-default css-ftn10w-BaseButtonComponent')
     .css('margin', '10px 0')
     .on('click', function() {
       $('#leet-compete-code').toggle();
@@ -31,10 +31,9 @@ function addToggleButton() {
 
 function addReloadButton(process) {
   $('<a>reload</a>')
-    .addClass('btn btn-default')
+    .addClass('btn btn-default css-ftn10w-BaseButtonComponent')
     .css('margin', '10px 0')
     .on('click', function() {
-      // $('#leet-compete-code').toggle();
       process();
     })
     .insertAfter('#leet-compete-code');

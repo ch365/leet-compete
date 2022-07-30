@@ -3,7 +3,7 @@
 
   "name": "Leet-Compete",
   "description": "Chrome extension for competing in LeetCode contests",
-  "version": "0.1",
+  "version": "0.2",
 
   "action": {
     "default_icon": "icon.png",
@@ -12,7 +12,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://leetcode.com/contest/*", "https://leetcode.cn/contest/*"],
+      "matches": [
+        "https://leetcode.com/contest/*",
+        "https://leetcode.cn/contest/*",
+        "https://leetcode.com/problems/*",
+        "https://leetcode.cn/problems/*"
+      ],
       "js": [
         "jquery-1.11.3.min.js",
         "header-template.js",
