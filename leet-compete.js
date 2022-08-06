@@ -27,6 +27,7 @@ const PROBLEM_TYPE = {
   "UNKNOWN": 0,
   "GENERAL": 1,
   "IMPLEMENT_CLASS": 2,
+  "VOID_RETURN": 3,
 };
 
 function ready() {
@@ -128,6 +129,15 @@ class Func {
 		}
 		return new Func(funcName, outputType, inputs, variables, startIndex, endIndex);
 	}
+
+	fixVoidOutput() {
+    for (let i = 0; i < this.variables.length; i++) {
+		  if (this.variables[i].isVector) {
+		    this.outputType = removeReference(this.variables[i].type);
+		    break;
+      }
+    }
+  }
 
   getInput(input) {
     let regex = '';
@@ -323,6 +333,10 @@ function parseSolutionTemplate() {
   } else {
     return PROBLEM_TYPE.UNKNOWN;
   }
+  if (funcArr[0].outputType == null) {
+    problemType = PROBLEM_TYPE.VOID_RETURN;
+    funcArr[0].fixVoidOutput();
+  }
 
   funcArr[0].genPrintExpected();
   return problemType;
@@ -356,6 +370,9 @@ function process() {
       break;
     case PROBLEM_TYPE.IMPLEMENT_CLASS:
       finalCode += genCodeImplementClass();
+      break;
+    case PROBLEM_TYPE.VOID_RETURN:
+      finalCode += genCodeVoidReturn();
       break;
     default:
       console.error("parse solution template failed");
@@ -395,6 +412,24 @@ function genCodeGeneral() {
   if (testNum === 0) {
     error('Failed to parse sample case');
   }
+  return codeContent;
+}
+
+function genCodeVoidReturn() {
+  let codeContent = '';
+  codeContent += "class SolutionWrapper {\n";
+  codeContent += "public:\n";
+  codeContent += "\t{{outputType}} {{funcName}}({{inputs}}) {\n";
+  codeContent += "\t\tSolution *sol = new Solution();\n";
+  codeContent += "\t\tsol->{{funcName}}({{inputArgs}});\n";
+  codeContent += "\t\treturn nums;\n";
+  codeContent += "\t}\n";
+  codeContent += "};\n";
+  codeContent = codeContent.replace(/{{outputType}}/g, funcArr[0].outputType);
+  codeContent = codeContent.replace(/{{funcName}}/g, funcArr[0].funcName);
+  codeContent = codeContent.replace(/{{inputArgs}}/g, funcArr[0].getInputArgs().join(', '));
+  codeContent = codeContent.replace(/{{inputs}}/g, funcArr[0].inputs);
+  codeContent += genCodeGeneral().replace(/Solution/g, 'SolutionWrapper');
   return codeContent;
 }
 
