@@ -12,6 +12,7 @@ let sampleSelector = '';
 
 let regexInput = '';
 let regexOutput = '';
+let explanation = '';
 
 let regexBool = '(true|false|0|1)';
 let regexInt = '-?\\d+';
@@ -33,10 +34,12 @@ function ready() {
   codeSelector = '.CodeMirror-line';
   sampleSelector = '.question-content > pre';
   regexInput = /Input[:]?((?:.|\n)*)Output/i;
-  regexOutput = /Output[:]?[\s\n]*([\S ]+)[\s\n]*(?:Explanation)?/i;
+  regexOutput = /Output[:]?[\s\n]*([\S\s\n]+)/i;
+  explanation = "Explanation";
   if (location.host.indexOf("leetcode.cn") !== -1) {
     regexInput = /输入[：:]?((?:.|\n)*)输出/i;
-    regexOutput = /输出[：:]?[\s\n]*([\S ]+)[\s\n]*(?:解释)?/i;
+    regexOutput = /输出[：:]?[\s\n]*([\S\s\n]+)/i;
+    explanation = "解释";
   }
   if (location.href.indexOf("/contest/") === -1) {
     isContestPage = false;
@@ -59,6 +62,21 @@ function isSupportedType(type) {
 
 function removeReference(s) {
   return s.replace(/&/g, '');
+}
+
+function getTypeAndName(s) {
+  s = s.trim();
+  let arr = s.split(/\s+/);
+  let n = arr.length;
+  let name = arr[n - 1];
+  let type = s.substr(0, s.length-name.length).trim();
+  if (type === "") {
+    type = null;
+  }
+  return {
+    name: name,
+    type: type
+  }
 }
 
 class Func {
@@ -85,16 +103,9 @@ class Func {
 		let endIndex = startIndex + funcMatch[0].length;
 
     // Parse output type and func name
-		let outputType = null, funcName = ''
-		let funcNameArr = funcMatch[1].trim().split(/\s+/);
-		if (funcNameArr.length === 1) {
-			funcName = funcNameArr[0];
-		} else if (funcNameArr.length === 2) {
-			outputType = funcNameArr[0];
-			funcName = funcNameArr[1];
-		} else {
-		  return null;
-    }
+    let funcTypeAndName = getTypeAndName(funcMatch[1]);
+    let funcName = funcTypeAndName.name
+    let outputType = funcTypeAndName.type
 
 		// Parse input variables
     let inputs = funcMatch[2].trim();
@@ -104,17 +115,15 @@ class Func {
 		  return new Func(funcName, outputType, inputs, variables, startIndex, endIndex);
     }
 		for (let i = 0; i < varsArr.length; i++) {
-			let v = varsArr[i];
-			let tokens = v.split(/\s+/);
-			let type = tokens[0], name = tokens[1];
-			if (!isSupportedType(type)) {
+			let typeAndName = getTypeAndName(varsArr[i]);
+			if (!isSupportedType(typeAndName.type)) {
 				error('Input variable type is not supported by Leet-Compete.');
 				return null;
 			}
 			variables.push({
-				name: name,
-				type: type,
-				isVector: type.match(regexVectorType) != null
+				name: typeAndName.name,
+				type: typeAndName.type,
+				isVector: typeAndName.type.match(regexVectorType) != null
 			});
 		}
 		return new Func(funcName, outputType, inputs, variables, startIndex, endIndex);
@@ -156,6 +165,9 @@ class Func {
       if (this.variables[i].isVector) {
         content = content.replace(/\[/g, '{');
         content = content.replace(/\]/g, '}');
+        if (this.variables[i].type.includes('char')) {
+          content = content.replace(/"/g, "'");
+        }
       }
       result.push(this.variables[i].name + ' = ' + content + ';');
     }
@@ -191,9 +203,13 @@ class Func {
     if (!isVector) {
       result.push('expected = ' + value + ';');
     } else {
-      let vectorType = this.outputType.match(regexVectorType)[1];
-      result.push(vectorType + ' outVec[] = {' + value + '};');
-      result.push('expected.assign(outVec, outVec + sizeof(outVec) / sizeof(outVec[0]));');
+      output = output.replace(/\n/g, '');
+      output = output.replace(/\[/g, '{');
+      output = output.replace(/\]/g, '}');
+      if (this.outputType.includes('char')) {
+        output = output.replace(/"/g, "'");
+      }
+      result.push('expected = ' + output + ';');
     }
     return result;
   }
@@ -203,8 +219,18 @@ class Func {
       // Output is vector
       this.printExpected = ' << "{ ";\n';
       this.printExpected += '\tfor (int i = 0; i < expected.size(); i++) {\n';
-      this.printExpected += '\t\tcout << expected[i] << (i == (int)expected.size() - 1 ? " }\\n" : ", ");\n';
-      this.printExpected += '\t}';
+      if ((this.outputType.match(/vector/g) || []).length > 1) {
+        this.printExpected += '\t\tcout << "{";\n';
+        this.printExpected += '\t\tfor (int j = 0; j < expected[i].size(); j++) {\n';
+        this.printExpected += '\t\t\tcout << expected[i][j] << (j == (int)expected[i].size() - 1 ? "" : ", ");\n';
+        this.printExpected += '\t\t}\n';
+        this.printExpected += '\t\tcout << "}";\n';
+        this.printExpected += '\t\tcout << (i + 1 == expected.size() ? "" : ",");\n';
+      } else {
+        this.printExpected += '\t\tcout << expected[i] << (i == (int)expected.size() - 1 ? "" : ", ");\n';
+      }
+      this.printExpected += '\t}\n';
+      this.printExpected += '\tcout << " }\\n";';
       this.printAnswer = this.printExpected.replace(/expected/g, 'answer');
     } else {
       // Output is regular variable.
@@ -274,6 +300,9 @@ function parseSolutionTemplate() {
 
   // Parse function
   let publicMatch = solutionTemplate.match(/public:/);
+  if (publicMatch == null) {
+    return PROBLEM_TYPE.UNKNOWN;
+  }
   let startIndex = publicMatch['index'] + publicMatch[0].length;
   while (true) {
     let func = Func.parseFunction(solutionTemplate, startIndex);
@@ -305,9 +334,14 @@ function parseSampleCase(content) {
   if (input == null || output == null) {
     return null;
   }
+  let real_output = output[1].trim();
+  let index_expl = real_output.indexOf(explanation);
+  if (index_expl !== -1) {
+    real_output = real_output.substr(0, index_expl).trim();
+  }
   return {
     input: input[1].trim(),
-    output: output[1].trim()
+    output: real_output
   };
 }
 
@@ -323,6 +357,8 @@ function process() {
     case PROBLEM_TYPE.IMPLEMENT_CLASS:
       finalCode += genCodeImplementClass();
       break;
+    default:
+      console.error("parse solution template failed");
   }
 
   finalCode += '\tif (!allSuccess) cout << "Some cases did not pass." << endl;\n';
@@ -472,8 +508,10 @@ if (isContestPage) {
   process();
   addButtons(process);
 } else {
+  let limit = 20
   let handle = setInterval(function() {
-    if ($(insertSelector).length && $(codeSelector).length && $(sampleSelector).length) {
+    limit--;
+    if (($(insertSelector).length && $(codeSelector).length && $(sampleSelector).length) || limit <= 0) {
       clearInterval(handle);
       process();
       addButtons(process);
