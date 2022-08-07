@@ -18,7 +18,6 @@ let regexBool = '(true|false|0|1)';
 let regexInt = '-?\\d+';
 let regexFloat = '(?:\\d+\\.)\\d+f?';
 let regexString = '\\".*\\"';
-let regexVector = '\\[.*\\]';
 let regexCapture = '\\[(.*)\\]';
 
 let regexVectorType = 'vector<(.*)>';
@@ -28,6 +27,7 @@ const PROBLEM_TYPE = {
   "GENERAL": 1,
   "IMPLEMENT_CLASS": 2,
   "VOID_RETURN": 3,
+  "LIST_NODE": 4,
 };
 
 function ready() {
@@ -51,7 +51,7 @@ function ready() {
 }
 
 function isSupportedType(type) {
-  let supportedTypes = ['bool', 'int', 'long long', 'float', 'double', 'string'];
+  let supportedTypes = ['bool', 'int', 'long long', 'float', 'double', 'string', 'ListNode*'];
   if (supportedTypes.indexOf(type) !== -1) {
     return true;
   }
@@ -80,10 +80,20 @@ function getTypeAndName(s) {
   }
 }
 
+
+class Variable {
+	constructor(name, type) {
+	  this.name = name;
+	  this.type = type;
+	  this.isVector = type.match(regexVectorType) != null;
+	  this.originalType = type;
+  }
+}
+
 class Func {
 	constructor(funcName, outputType, inputs, variables, startIndex, endIndex) {
 		this.funcName = funcName;
-		this.outputType = outputType;
+		this.outputVar = new Variable('', outputType);
 		this.inputs = inputs;
 		this.variables = variables;
 		this.startIndex = startIndex;
@@ -91,7 +101,7 @@ class Func {
 		this.printExpected = '';
 		this.printAnswer = '';
 		if (outputType === 'void') {
-		  this.outputType = null;
+      this.outputVar.type = null;
     }
 	}
 
@@ -121,11 +131,7 @@ class Func {
 				error('Input variable type is not supported by Leet-Compete.');
 				return null;
 			}
-			variables.push({
-				name: typeAndName.name,
-				type: typeAndName.type,
-				isVector: typeAndName.type.match(regexVectorType) != null
-			});
+			variables.push(new Variable(typeAndName.name, typeAndName.type));
 		}
 		return new Func(funcName, outputType, inputs, variables, startIndex, endIndex);
 	}
@@ -133,8 +139,23 @@ class Func {
 	fixVoidOutput() {
     for (let i = 0; i < this.variables.length; i++) {
 		  if (this.variables[i].isVector) {
-		    this.outputType = removeReference(this.variables[i].type);
+		    this.outputVar.type = removeReference(this.variables[i].type);
+		    this.outputVar.name = this.variables[i].name;
+		    this.outputVar.isVector = true;
 		    break;
+      }
+    }
+  }
+
+  handleNodeType() {
+	  if (this.outputVar.type === 'ListNode*') {
+	    this.outputVar.type = 'vector<int>';
+	    this.outputVar.isVector = true;
+    }
+    for (let i = 0; i < this.variables.length; i++) {
+      if (this.variables[i].type === 'ListNode*') {
+        this.variables[i].type = 'vector<int>';
+        this.variables[i].isVector = true;
       }
     }
   }
@@ -171,37 +192,35 @@ class Func {
 
   getOutput(output) {
     let value = '';
-    let isVector = false;
     switch (true) {
-      case this.outputType === 'bool':
+      case this.outputVar.type === 'bool':
         value = output.match(RegExp(regexBool, 'i'))[0].toLowerCase();
         break;
-      case this.outputType === 'int' || this.outputType === 'long long':
+      case this.outputVar.type === 'int' || this.outputVar.type === 'long long':
         value = output.match(RegExp(regexInt, 'i'))[0];
         break;
-      case this.outputType === 'float' || this.outputType === 'double':
+      case this.outputVar.type === 'float' || this.outputVar.type === 'double':
         value = output.match(RegExp(regexFloat, 'i'))[0];
         break;
-      case this.outputType === 'string':
+      case this.outputVar.type === 'string':
         value = output.match(RegExp(regexString, 'i'))[0];
         break;
-      case this.outputType === 'char':
+      case this.outputVar.type === 'char':
         value = output.match(RegExp(regexString, 'i'))[0];
         value = "'" + value[1] + "'";
         break;
-      case this.outputType && this.outputType.match(RegExp(regexVectorType, 'i')) != null:
-        isVector = true;
+      case this.outputVar.isVector:
         value = output.match(regexCapture)[1];
         break;
     }
     let result = [];
-    if (!isVector) {
+    if (!this.outputVar.isVector) {
       result.push('expected = ' + value + ';');
     } else {
       output = output.replace(/\n/g, '');
       output = output.replace(/\[/g, '{');
       output = output.replace(/\]/g, '}');
-      if (this.outputType.includes('char')) {
+      if (this.outputVar.type.includes('char')) {
         output = output.replace(/"/g, "'");
       }
       result.push('expected = ' + output + ';');
@@ -210,11 +229,11 @@ class Func {
   }
 
   genPrintExpected() {
-    if (this.outputType && this.outputType.match(regexVectorType) != null) {
+    if (this.outputVar.type && this.outputVar.isVector) {
       // Output is vector
       this.printExpected = ' << "{ ";\n';
       this.printExpected += '\tfor (int i = 0; i < expected.size(); i++) {\n';
-      if ((this.outputType.match(/vector/g) || []).length > 1) {
+      if ((this.outputVar.type.match(/vector/g) || []).length > 1) {
         this.printExpected += '\t\tcout << "{";\n';
         this.printExpected += '\t\tfor (int j = 0; j < expected[i].size(); j++) {\n';
         this.printExpected += '\t\t\tcout << expected[i][j] << (j == (int)expected[i].size() - 1 ? "" : ", ");\n';
@@ -238,19 +257,28 @@ class Func {
 	  return this.variables.map(function(v) { return v.name; });
   }
 
+  getInputAdjustArgs() {
+	  return this.variables.map(function(v) {
+	    if (v.originalType === 'ListNode*') {
+	      return 'convertViToListNode(' + v.name + ')';
+      }
+	    return v.name;
+	  });
+  }
+
   getVarDeclaration() {
 	  let code = '';
     for (let i = 0; i < this.variables.length; i++) {
       code += '\t' + removeReference(this.variables[i].type) + ' ' + this.variables[i].name + ';\n';
     }
-    code += '\t' + this.outputType + ' expected;\n';
+    code += '\t' + this.outputVar.type + ' expected;\n';
     return code;
   }
 
   getRunTest(runTest) {
     runTest = runTest.replace(/{{className}}/g, templateClassName);
     runTest = runTest.replace(/{{inputs}}/g, this.inputs);
-    runTest = runTest.replace(/{{outputType}}/g, this.outputType);
+    runTest = runTest.replace(/{{outputType}}/g, this.outputVar.type);
     runTest = runTest.replace(/{{funcName}}/g, this.funcName);
     runTest = runTest.replace(/{{inputArgs}}/g, this.getInputArgs().join(', '));
     runTest = runTest.replace(/{{printExpected}}/g, this.printExpected);
@@ -272,9 +300,12 @@ function parseSolutionTemplate() {
     solutionTemplate = solutionTemplate.replace(/\}/g, '}\n');
   }
 
-  if (solutionTemplate.match(/struct TreeNode/) != null) {
+  if (solutionTemplate.match(/struct\sTreeNode/) != null) {
     error('Problems with TreeNode are not yet supported.');
     return PROBLEM_TYPE.UNKNOWN;
+  }
+  if (solutionTemplate.match(/struct\sListNode/) != null) {
+    problemType = PROBLEM_TYPE.LIST_NODE;
   }
 
   solutionTemplate = solutionTemplate.replace(/\/\*\*(.|\n)*\*\//g, '').trim();
@@ -311,14 +342,16 @@ function parseSolutionTemplate() {
     return PROBLEM_TYPE.UNKNOWN;
   }
 
-  if (templateClassName === "Solution") {
+  if (problemType === PROBLEM_TYPE.LIST_NODE) {
+    funcArr[0].handleNodeType();
+  } else if (templateClassName === "Solution") {
     problemType = PROBLEM_TYPE.GENERAL;
   } else if (templateClassName === funcArr[0].funcName) {
     problemType = PROBLEM_TYPE.IMPLEMENT_CLASS;
   } else {
     return PROBLEM_TYPE.UNKNOWN;
   }
-  if (funcArr[0].outputType == null) {
+  if (funcArr[0].outputVar.type == null) {
     problemType = PROBLEM_TYPE.VOID_RETURN;
     funcArr[0].fixVoidOutput();
   }
@@ -358,6 +391,9 @@ function process() {
       break;
     case PROBLEM_TYPE.VOID_RETURN:
       finalCode += genCodeVoidReturn();
+      break;
+    case PROBLEM_TYPE.LIST_NODE:
+      finalCode += genCodeListNode();
       break;
     default:
       console.error("parse solution template failed");
@@ -407,14 +443,49 @@ function genCodeVoidReturn() {
   codeContent += "\t{{outputType}} {{funcName}}({{inputs}}) {\n";
   codeContent += "\t\tSolution *sol = new Solution();\n";
   codeContent += "\t\tsol->{{funcName}}({{inputArgs}});\n";
-  codeContent += "\t\treturn nums;\n";
+  codeContent += "\t\treturn {{outputName}};\n";
   codeContent += "\t}\n";
   codeContent += "};\n";
-  codeContent = codeContent.replace(/{{outputType}}/g, funcArr[0].outputType);
+  codeContent = codeContent.replace(/{{outputType}}/g, funcArr[0].outputVar.type);
+  codeContent = codeContent.replace(/{{outputName}}/g, funcArr[0].outputVar.name);
   codeContent = codeContent.replace(/{{funcName}}/g, funcArr[0].funcName);
   codeContent = codeContent.replace(/{{inputArgs}}/g, funcArr[0].getInputArgs().join(', '));
   codeContent = codeContent.replace(/{{inputs}}/g, funcArr[0].inputs);
   codeContent += genCodeGeneral().replace(/Solution/g, 'SolutionWrapper');
+  return codeContent;
+}
+
+function genCodeListNode() {
+  let codeContent = '';
+  codeContent += "vector<int> convertListNodeToVi(ListNode* head) {\n";
+  codeContent += "\tvector<int> a;\n";
+  codeContent += "\twhile(head) { a.push_back(head->val); head = head->next; }\n";
+  codeContent += "\treturn a;\n";
+  codeContent += "}\n\n";
+  codeContent += "ListNode* convertViToListNode(vector<int> a) {\n";
+  codeContent += "\tListNode* head = nullptr;\n";
+  codeContent += "\treverse(a.begin(), a.end());\n";
+  codeContent += "\tfor (auto v: a) head = new ListNode(v, head);\n";
+  codeContent += "\treturn head;\n";
+  codeContent += "}\n\n";
+  codeContent += "class SolutionWrapper {\n";
+  codeContent += "public:\n";
+  codeContent += "\t{{outputType}} {{funcName}}({{inputsAdjust}}) {\n";
+  codeContent += "\t\tSolution *sol = new Solution();\n";
+  codeContent += "\t\t{{outputOriginalType}} answer = sol->{{funcName}}({{inputArgs}});\n";
+  codeContent += "\t\treturn {{outputName}};\n";
+  codeContent += "\t}\n";
+  codeContent += "};\n";
+  codeContent = codeContent.replace(/{{outputOriginalType}}/g, funcArr[0].outputVar.originalType);
+  let outputName = (funcArr[0].outputVar.originalType === "ListNode*" ? "convertListNodeToVi(answer)" : "answer");
+  codeContent = codeContent.replace(/{{outputName}}/g, outputName);
+  codeContent = codeContent.replace(/{{outputType}}/g, funcArr[0].outputVar.type);
+  codeContent = codeContent.replace(/{{funcName}}/g, funcArr[0].funcName);
+  codeContent = codeContent.replace(/{{inputArgs}}/g, funcArr[0].getInputAdjustArgs().join(', '));
+  codeContent = codeContent.replace(/{{inputs}}/g, funcArr[0].inputs);
+  codeContent = codeContent.replace(/{{inputsAdjust}}/g, funcArr[0].inputs.replace(/ListNode\*/g, 'vector<int>'));
+  codeContent += genCodeGeneral().replace(/Solution/g, 'SolutionWrapper')
+    .replace(/ListNode\*/g, 'vector<int>');
   return codeContent;
 }
 
@@ -459,8 +530,8 @@ function getFuncRunCode(func, inputArgs, expected, is_constructor) {
     codeContent += '\t\t';
     if (is_constructor) {
       codeContent += 'sol = new ';
-    } else if (func.outputType) {
-      codeContent += removeReference(func.outputType) + ' answer = sol->';
+    } else if (func.outputVar.type) {
+      codeContent += removeReference(func.outputVar.type) + ' answer = sol->';
     } else {
       codeContent += 'sol->';
     }
@@ -471,8 +542,8 @@ function getFuncRunCode(func, inputArgs, expected, is_constructor) {
       codeContent += (v.isVector ? v.name : inputArgs[i]);
     }
     codeContent += ');\n';
-    if (func.outputType) {
-      codeContent += '\t\t' + removeReference(func.outputType) + ' expected = ' + expected + ';\n';
+    if (func.outputVar.type) {
+      codeContent += '\t\t' + removeReference(func.outputVar.type) + ' expected = ' + expected + ';\n';
       codeContent += '\t\tcout << "Expected: " << answer << endl;\n';
       codeContent += '\t\tcout << "Received: " << expected << endl;\n';
       codeContent += '\t\tcout << "Result: ";\n';
