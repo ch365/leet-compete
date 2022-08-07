@@ -4,6 +4,7 @@ let solutionTemplate;
 
 let templateClassName = '';
 let funcArr = [];
+let inf = 1<<30;
 
 let isContestPage = true;
 let insertSelector = '';
@@ -28,6 +29,7 @@ const PROBLEM_TYPE = {
   "IMPLEMENT_CLASS": 2,
   "VOID_RETURN": 3,
   "LIST_NODE": 4,
+  "TREE_NODE": 5,
 };
 
 function ready() {
@@ -51,7 +53,7 @@ function ready() {
 }
 
 function isSupportedType(type) {
-  let supportedTypes = ['bool', 'int', 'long long', 'float', 'double', 'string', 'ListNode*'];
+  let supportedTypes = ['bool', 'int', 'long long', 'float', 'double', 'string', 'ListNode*', 'TreeNode*'];
   if (supportedTypes.indexOf(type) !== -1) {
     return true;
   }
@@ -87,6 +89,22 @@ class Variable {
 	  this.type = type;
 	  this.isVector = type.match(regexVectorType) != null;
 	  this.originalType = type;
+  }
+
+	getValue(value) {
+    if (!this.isVector) {
+      return value;
+    }
+    value = value.replace(/\n/g, '');
+    value = value.replace(/\[/g, '{');
+    value = value.replace(/\]/g, '}');
+    if (this.type.includes('char')) {
+      value = value.replace(/"/g, "'");
+    }
+    if (this.originalType === 'TreeNode*') {
+      value = value.replace(/null/g, inf.toString());
+    }
+    return value;
   }
 }
 
@@ -148,12 +166,12 @@ class Func {
   }
 
   handleNodeType() {
-	  if (this.outputVar.type === 'ListNode*') {
+	  if (['ListNode*', 'TreeNode*'].includes(this.outputVar.type)) {
 	    this.outputVar.type = 'vector<int>';
 	    this.outputVar.isVector = true;
     }
     for (let i = 0; i < this.variables.length; i++) {
-      if (this.variables[i].type === 'ListNode*') {
+      if (['ListNode*', 'TreeNode*'].includes(this.variables[i].type)) {
         this.variables[i].type = 'vector<int>';
         this.variables[i].isVector = true;
       }
@@ -177,15 +195,8 @@ class Func {
     inputArr.push(input);
     let result = [];
     for (let i = 0; i < this.variables.length; i++) {
-      let content = inputArr[i].replace(/^(\s|,)+|(\s|,)+$/g, '');
-      if (this.variables[i].isVector) {
-        content = content.replace(/\[/g, '{');
-        content = content.replace(/\]/g, '}');
-        if (this.variables[i].type.includes('char')) {
-          content = content.replace(/"/g, "'");
-        }
-      }
-      result.push(this.variables[i].name + ' = ' + content + ';');
+      let value = inputArr[i].replace(/^(\s|,)+|(\s|,)+$/g, '');
+      result.push(this.variables[i].name + ' = ' + this.variables[i].getValue(value) + ';');
     }
     return result;
   }
@@ -217,31 +228,30 @@ class Func {
     if (!this.outputVar.isVector) {
       result.push('expected = ' + value + ';');
     } else {
-      output = output.replace(/\n/g, '');
-      output = output.replace(/\[/g, '{');
-      output = output.replace(/\]/g, '}');
-      if (this.outputVar.type.includes('char')) {
-        output = output.replace(/"/g, "'");
-      }
-      result.push('expected = ' + output + ';');
+      result.push('expected = ' + this.outputVar.getValue(output) + ';');
     }
     return result;
   }
 
   genPrintExpected() {
-    if (this.outputVar.type && this.outputVar.isVector) {
+    if (this.outputVar.isVector) {
       // Output is vector
       this.printExpected = ' << "{ ";\n';
       this.printExpected += '\tfor (int i = 0; i < expected.size(); i++) {\n';
       if ((this.outputVar.type.match(/vector/g) || []).length > 1) {
         this.printExpected += '\t\tcout << "{";\n';
         this.printExpected += '\t\tfor (int j = 0; j < expected[i].size(); j++) {\n';
-        this.printExpected += '\t\t\tcout << expected[i][j] << (j == (int)expected[i].size() - 1 ? "" : ", ");\n';
+        this.printExpected += '\t\t\tcout << expected[i][j] << (j+1 == (int)expected[i].size() ? "" : ", ");\n';
         this.printExpected += '\t\t}\n';
         this.printExpected += '\t\tcout << "}";\n';
-        this.printExpected += '\t\tcout << (i + 1 == expected.size() ? "" : ",");\n';
+        this.printExpected += '\t\tcout << (i+1 == expected.size() ? "" : ",");\n';
       } else {
-        this.printExpected += '\t\tcout << expected[i] << (i == (int)expected.size() - 1 ? "" : ", ");\n';
+        if (this.outputVar.originalType === 'TreeNode*') {
+          this.printExpected += '\t\texpected[i] == {{inf}} ? cout << "null" : cout << expected[i];\n';
+          this.printExpected += '\t\tcout << (i+1 == (int)expected.size() ? "" : ", ");\n';
+        } else {
+          this.printExpected += '\t\tcout << expected[i] << (i+1 == (int)expected.size() ? "" : ", ");\n';
+        }
       }
       this.printExpected += '\t}\n';
       this.printExpected += '\tcout << " }\\n";';
@@ -261,6 +271,8 @@ class Func {
 	  return this.variables.map(function(v) {
 	    if (v.originalType === 'ListNode*') {
 	      return 'convertViToListNode(' + v.name + ')';
+      } else if (v.originalType === 'TreeNode*') {
+	      return 'convertViToTreeNode(' + v.name + ')';
       }
 	    return v.name;
 	  });
@@ -301,8 +313,7 @@ function parseSolutionTemplate() {
   }
 
   if (solutionTemplate.match(/struct\sTreeNode/) != null) {
-    error('Problems with TreeNode are not yet supported.');
-    return PROBLEM_TYPE.UNKNOWN;
+    problemType = PROBLEM_TYPE.TREE_NODE;
   }
   if (solutionTemplate.match(/struct\sListNode/) != null) {
     problemType = PROBLEM_TYPE.LIST_NODE;
@@ -342,7 +353,7 @@ function parseSolutionTemplate() {
     return PROBLEM_TYPE.UNKNOWN;
   }
 
-  if (problemType === PROBLEM_TYPE.LIST_NODE) {
+  if ([PROBLEM_TYPE.LIST_NODE, PROBLEM_TYPE.TREE_NODE].includes(problemType)) {
     funcArr[0].handleNodeType();
   } else if (templateClassName === "Solution") {
     problemType = PROBLEM_TYPE.GENERAL;
@@ -394,6 +405,9 @@ function process() {
       break;
     case PROBLEM_TYPE.LIST_NODE:
       finalCode += genCodeListNode();
+      break;
+    case PROBLEM_TYPE.TREE_NODE:
+      finalCode += genCodeTreeNode();
       break;
     default:
       console.error("parse solution template failed");
@@ -486,6 +500,58 @@ function genCodeListNode() {
   codeContent = codeContent.replace(/{{inputsAdjust}}/g, funcArr[0].inputs.replace(/ListNode\*/g, 'vector<int>'));
   codeContent += genCodeGeneral().replace(/Solution/g, 'SolutionWrapper')
     .replace(/ListNode\*/g, 'vector<int>');
+  return codeContent;
+}
+
+function genCodeTreeNode() {
+  let codeContent = '';
+  codeContent += "vector<int> convertTreeNodeToVi(TreeNode* root) {\n";
+  codeContent += "\tvector<int> a;\n";
+  codeContent += "\tqueue<TreeNode*> q;\n";
+  codeContent += "\tif (root) q.push(root);\n";
+  codeContent += "\twhile(not q.empty()) {\n";
+  codeContent += "\t\tauto cur = q.front(); q.pop();\n";
+  codeContent += "\t\tif (not cur) { a.push_back({{inf}}); continue; }\n";
+  codeContent += "\t\tif (cur->left or cur->right) {q.push(cur->left); q.push(cur->right);}\n";
+  codeContent += "\t\ta.push_back(cur->val);\n";
+  codeContent += "\t}\n";
+  codeContent += "\twhile(a.size() and a[a.size()-1]=={{inf}}) a.pop_back();\n";
+  codeContent += "\treturn a;\n";
+  codeContent += "}\n\n";
+  codeContent += "TreeNode* convertViToTreeNode(vector<int> a) {\n";
+  codeContent += "\tqueue<TreeNode*> q;\n";
+  codeContent += "\tTreeNode* root = nullptr;\n";
+  codeContent += "\tint n = a.size();\n";
+  codeContent += "\tfor (int i = 0; i < n; i++) {\n";
+  codeContent += "\t\tif (q.empty()) {\n";
+  codeContent += "\t\t\troot = new TreeNode(a[i]); q.push(root);\n";
+  codeContent += "\t\t} else {\n";
+  codeContent += "\t\t\tauto cur = q.front(); q.pop();\n";
+  codeContent += "\t\t\tif (a[i] != {{inf}}) {cur->left = new TreeNode(a[i]); q.push(cur->left);}\n";
+  codeContent += "\t\t\tif (++i < n and a[i] != {{inf}}) {cur->right = new TreeNode(a[i]); q.push(cur->right);}\n";
+  codeContent += "\t\t}\n";
+  codeContent += "\t}\n";
+  codeContent += "\treturn root;\n";
+  codeContent += "}\n\n";
+  codeContent += "class SolutionWrapper {\n";
+  codeContent += "public:\n";
+  codeContent += "\t{{outputType}} {{funcName}}({{inputsAdjust}}) {\n";
+  codeContent += "\t\tSolution *sol = new Solution();\n";
+  codeContent += "\t\t{{outputOriginalType}} answer = sol->{{funcName}}({{inputArgs}});\n";
+  codeContent += "\t\treturn {{outputName}};\n";
+  codeContent += "\t}\n";
+  codeContent += "};\n";
+  codeContent = codeContent.replace(/{{outputOriginalType}}/g, funcArr[0].outputVar.originalType);
+  let outputName = (funcArr[0].outputVar.originalType === "TreeNode*" ? "convertTreeNodeToVi(answer)" : "answer");
+  codeContent = codeContent.replace(/{{outputName}}/g, outputName);
+  codeContent = codeContent.replace(/{{outputType}}/g, funcArr[0].outputVar.type);
+  codeContent = codeContent.replace(/{{funcName}}/g, funcArr[0].funcName);
+  codeContent = codeContent.replace(/{{inputArgs}}/g, funcArr[0].getInputAdjustArgs().join(', '));
+  codeContent = codeContent.replace(/{{inputs}}/g, funcArr[0].inputs);
+  codeContent = codeContent.replace(/{{inputsAdjust}}/g, funcArr[0].inputs.replace(/TreeNode\*/g, 'vector<int>'));
+  codeContent += genCodeGeneral().replace(/Solution/g, 'SolutionWrapper')
+    .replace(/TreeNode\*/g, 'vector<int>');
+  codeContent = codeContent.replace(/{{inf}}/g, inf.toString());
   return codeContent;
 }
 
