@@ -140,38 +140,23 @@ class Func {
   }
 
   getInput(input) {
-    let regex = '';
+    let inputArr = [];
     for (let i = 0; i < this.variables.length; i++) {
       let name = this.variables[i].name;
-      let type = this.variables[i].type;
-      regex += '(?:' + name + '[\\s\\n]*[=:][\\s\\n]*)?';
-      switch (true) {
-        case type === 'bool':
-          regex += '(' + regexBool + ')';
-          break;
-        case type === 'int' || type === 'long long':
-          regex += '(' + regexInt + ')';
-          break;
-        case type === 'float' || type === 'double':
-          regex += '(' + regexFloat + ')';
-          break;
-        case type === 'string':
-          regex += '(' + regexString + ')';
-          break;
-        case type.match(regexVectorType) != null:
-          regex += '(' + regexVector + ')';
-          break;
+      let matched = input.match(RegExp(name + '[\\s\\n]*[=:]', 'i'));
+      if (matched == null) {
+        error('getInput exception');
+        return [];
       }
-      regex += '[\\s\\n,;]*';
+      let startIndex = matched['index'];
+      let endIndex = startIndex + matched[0].length;
+      if (i) inputArr.push(input.substr(0, startIndex));
+      input = input.substr(endIndex);
     }
+    inputArr.push(input);
     let result = [];
-    let matched = input.match(RegExp(regex, 'i'));
-    if (matched == null) {
-      error('getInput exception');
-      return [];
-    }
     for (let i = 0; i < this.variables.length; i++) {
-      let content = matched[i + 1];
+      let content = inputArr[i].replace(/^(\s|,)+|(\s|,)+$/g, '');
       if (this.variables[i].isVector) {
         content = content.replace(/\[/g, '{');
         content = content.replace(/\]/g, '}');
@@ -292,7 +277,7 @@ function parseSolutionTemplate() {
     return PROBLEM_TYPE.UNKNOWN;
   }
 
-  solutionTemplate = solutionTemplate.replace(/\/\*\*(.|\n)*\*\/\n/g, '');
+  solutionTemplate = solutionTemplate.replace(/\/\*\*(.|\n)*\*\//g, '').trim();
   solutionTemplate = solutionTemplate.replace(/\u00A0/g, ' ');
   solutionTemplate = solutionTemplate.replace(/\u200B/g, '');
   solutionTemplate = solutionTemplate.replace(/    /g, '\t');
@@ -362,7 +347,7 @@ function parseSampleCase(content) {
 function process() {
   let problemType = parseSolutionTemplate()
 
-  let finalCode = headerTemplate + '\n' + solutionTemplate + '\n';
+  let finalCode = headerTemplate + '\n' + solutionTemplate + '\n\n\n';
 
   switch (problemType) {
     case PROBLEM_TYPE.GENERAL:
