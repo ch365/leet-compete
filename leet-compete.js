@@ -48,7 +48,7 @@ function ready() {
     isContestPage = false;
     insertSelector = '.css-1rngd9y-ZoomWrapper';
     codeSelector = '.monaco-mouse-cursor-text';
-    sampleSelector = '.notranslate > pre';
+    sampleSelector = '.notranslate pre';
   }
 }
 
