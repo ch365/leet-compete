@@ -57,7 +57,7 @@ function isSupportedType(type) {
   if (supportedTypes.indexOf(type) !== -1) {
     return true;
   }
-  if (type.match(regexVectorType) != null) {
+  if (type && type.match(regexVectorType) != null) {
     return true;
   }
   return false;
@@ -87,8 +87,13 @@ class Variable {
 	constructor(name, type) {
 	  this.name = name;
 	  this.type = type;
-	  this.isVector = type.match(regexVectorType) != null;
+	  this.isVector = this.typeMatch(regexVectorType) !== null;
 	  this.originalType = type;
+  }
+
+  typeMatch(regex) {
+	  if (!this.type) return null;
+	  return this.type.match(regex);
   }
 
 	getValue(value) {
@@ -236,26 +241,8 @@ class Func {
   genPrintExpected() {
     if (this.outputVar.isVector) {
       // Output is vector
-      this.printExpected = ' << "{ ";\n';
-      this.printExpected += '\tfor (int i = 0; i < expected.size(); i++) {\n';
-      if ((this.outputVar.type.match(/vector/g) || []).length > 1) {
-        this.printExpected += '\t\tcout << "{";\n';
-        this.printExpected += '\t\tfor (int j = 0; j < expected[i].size(); j++) {\n';
-        this.printExpected += '\t\t\tcout << expected[i][j] << (j+1 == (int)expected[i].size() ? "" : ", ");\n';
-        this.printExpected += '\t\t}\n';
-        this.printExpected += '\t\tcout << "}";\n';
-        this.printExpected += '\t\tcout << (i+1 == expected.size() ? "" : ",");\n';
-      } else {
-        if (this.outputVar.originalType === 'TreeNode*') {
-          this.printExpected += '\t\texpected[i] == {{inf}} ? cout << "null" : cout << expected[i];\n';
-          this.printExpected += '\t\tcout << (i+1 == (int)expected.size() ? "" : ", ");\n';
-        } else {
-          this.printExpected += '\t\tcout << expected[i] << (i+1 == (int)expected.size() ? "" : ", ");\n';
-        }
-      }
-      this.printExpected += '\t}\n';
-      this.printExpected += '\tcout << " }\\n";';
-      this.printAnswer = this.printExpected.replace(/expected/g, 'answer');
+      this.printExpected = ' << vecToStr(expected) << endl;';
+      this.printAnswer = ' << vecToStr(answer) << endl;';
     } else {
       // Output is regular variable.
       this.printExpected = ' << expected << endl;';
@@ -310,6 +297,7 @@ function parseSolutionTemplate() {
     solutionTemplate = solutionTemplate.replace('public:', 'public:\n');
     solutionTemplate = solutionTemplate.replace(/\{/g, '{\n');
     solutionTemplate = solutionTemplate.replace(/\}/g, '}\n');
+    solutionTemplate = solutionTemplate.replace(/\}\n;/g, '};');
   }
 
   if (solutionTemplate.match(/struct\sTreeNode/) != null) {
@@ -362,7 +350,7 @@ function parseSolutionTemplate() {
   } else {
     return PROBLEM_TYPE.UNKNOWN;
   }
-  if (funcArr[0].outputVar.type == null) {
+  if (problemType === PROBLEM_TYPE.GENERAL && funcArr[0].outputVar.type == null) {
     problemType = PROBLEM_TYPE.VOID_RETURN;
     funcArr[0].fixVoidOutput();
   }
@@ -392,6 +380,7 @@ function process() {
   let problemType = parseSolutionTemplate()
 
   let finalCode = headerTemplate + '\n' + solutionTemplate + '\n\n\n';
+  finalCode += utilsFuncCode;
 
   switch (problemType) {
     case PROBLEM_TYPE.GENERAL:
@@ -407,12 +396,14 @@ function process() {
       finalCode += genCodeListNode();
       break;
     case PROBLEM_TYPE.TREE_NODE:
+      finalCode = finalCode.replace(/{{a\[i\]}}/g, '(a[i]==' + inf.toString() + '?"null":to_string(a[i]))');
       finalCode += genCodeTreeNode();
       break;
     default:
       console.error("parse solution template failed");
   }
 
+  finalCode = finalCode.replace(/{{a\[i\]}}/g, 'a[i]');
   finalCode += '\tif (!allSuccess) cout << "Some cases did not pass." << endl;\n';
   finalCode += '\telse cout << "All samples succeeded! :)" << endl;\n';
   finalCode += '\treturn 0;\n}\n'; // end testing main function
@@ -451,15 +442,7 @@ function genCodeGeneral() {
 }
 
 function genCodeVoidReturn() {
-  let codeContent = '';
-  codeContent += "class SolutionWrapper {\n";
-  codeContent += "public:\n";
-  codeContent += "\t{{outputType}} {{funcName}}({{inputs}}) {\n";
-  codeContent += "\t\tSolution *sol = new Solution();\n";
-  codeContent += "\t\tsol->{{funcName}}({{inputArgs}});\n";
-  codeContent += "\t\treturn {{outputName}};\n";
-  codeContent += "\t}\n";
-  codeContent += "};\n";
+  let codeContent = voidReturnCode;
   codeContent = codeContent.replace(/{{outputType}}/g, funcArr[0].outputVar.type);
   codeContent = codeContent.replace(/{{outputName}}/g, funcArr[0].outputVar.name);
   codeContent = codeContent.replace(/{{funcName}}/g, funcArr[0].funcName);
@@ -470,26 +453,7 @@ function genCodeVoidReturn() {
 }
 
 function genCodeListNode() {
-  let codeContent = '';
-  codeContent += "vector<int> convertListNodeToVi(ListNode* head) {\n";
-  codeContent += "\tvector<int> a;\n";
-  codeContent += "\twhile(head) { a.push_back(head->val); head = head->next; }\n";
-  codeContent += "\treturn a;\n";
-  codeContent += "}\n\n";
-  codeContent += "ListNode* convertViToListNode(vector<int> a) {\n";
-  codeContent += "\tListNode* head = nullptr;\n";
-  codeContent += "\treverse(a.begin(), a.end());\n";
-  codeContent += "\tfor (auto v: a) head = new ListNode(v, head);\n";
-  codeContent += "\treturn head;\n";
-  codeContent += "}\n\n";
-  codeContent += "class SolutionWrapper {\n";
-  codeContent += "public:\n";
-  codeContent += "\t{{outputType}} {{funcName}}({{inputsAdjust}}) {\n";
-  codeContent += "\t\tSolution *sol = new Solution();\n";
-  codeContent += "\t\t{{outputOriginalType}} answer = sol->{{funcName}}({{inputArgs}});\n";
-  codeContent += "\t\treturn {{outputName}};\n";
-  codeContent += "\t}\n";
-  codeContent += "};\n";
+  let codeContent = listNodeCode;
   codeContent = codeContent.replace(/{{outputOriginalType}}/g, funcArr[0].outputVar.originalType);
   let outputName = (funcArr[0].outputVar.originalType === "ListNode*" ? "convertListNodeToVi(answer)" : "answer");
   codeContent = codeContent.replace(/{{outputName}}/g, outputName);
@@ -504,43 +468,7 @@ function genCodeListNode() {
 }
 
 function genCodeTreeNode() {
-  let codeContent = '';
-  codeContent += "vector<int> convertTreeNodeToVi(TreeNode* root) {\n";
-  codeContent += "\tvector<int> a;\n";
-  codeContent += "\tqueue<TreeNode*> q;\n";
-  codeContent += "\tif (root) q.push(root);\n";
-  codeContent += "\twhile(not q.empty()) {\n";
-  codeContent += "\t\tauto cur = q.front(); q.pop();\n";
-  codeContent += "\t\tif (not cur) { a.push_back({{inf}}); continue; }\n";
-  codeContent += "\t\tif (cur->left or cur->right) {q.push(cur->left); q.push(cur->right);}\n";
-  codeContent += "\t\ta.push_back(cur->val);\n";
-  codeContent += "\t}\n";
-  codeContent += "\twhile(a.size() and a[a.size()-1]=={{inf}}) a.pop_back();\n";
-  codeContent += "\treturn a;\n";
-  codeContent += "}\n\n";
-  codeContent += "TreeNode* convertViToTreeNode(vector<int> a) {\n";
-  codeContent += "\tqueue<TreeNode*> q;\n";
-  codeContent += "\tTreeNode* root = nullptr;\n";
-  codeContent += "\tint n = a.size();\n";
-  codeContent += "\tfor (int i = 0; i < n; i++) {\n";
-  codeContent += "\t\tif (q.empty()) {\n";
-  codeContent += "\t\t\troot = new TreeNode(a[i]); q.push(root);\n";
-  codeContent += "\t\t} else {\n";
-  codeContent += "\t\t\tauto cur = q.front(); q.pop();\n";
-  codeContent += "\t\t\tif (a[i] != {{inf}}) {cur->left = new TreeNode(a[i]); q.push(cur->left);}\n";
-  codeContent += "\t\t\tif (++i < n and a[i] != {{inf}}) {cur->right = new TreeNode(a[i]); q.push(cur->right);}\n";
-  codeContent += "\t\t}\n";
-  codeContent += "\t}\n";
-  codeContent += "\treturn root;\n";
-  codeContent += "}\n\n";
-  codeContent += "class SolutionWrapper {\n";
-  codeContent += "public:\n";
-  codeContent += "\t{{outputType}} {{funcName}}({{inputsAdjust}}) {\n";
-  codeContent += "\t\tSolution *sol = new Solution();\n";
-  codeContent += "\t\t{{outputOriginalType}} answer = sol->{{funcName}}({{inputArgs}});\n";
-  codeContent += "\t\treturn {{outputName}};\n";
-  codeContent += "\t}\n";
-  codeContent += "};\n";
+  let codeContent = treeNodeCode;
   codeContent = codeContent.replace(/{{outputOriginalType}}/g, funcArr[0].outputVar.originalType);
   let outputName = (funcArr[0].outputVar.originalType === "TreeNode*" ? "convertTreeNodeToVi(answer)" : "answer");
   codeContent = codeContent.replace(/{{outputName}}/g, outputName);
@@ -555,80 +483,116 @@ function genCodeTreeNode() {
   return codeContent;
 }
 
-function parseVector(input) {
-  input = input.trim();
-  if (input === '') return null;
-  let cnt = 0;
-  let start = 0;
-  let result = [];
-  for (let i = 0; i < input.length; i++) {
-    if (input[i] === '[') {
-      cnt++;
-      if (cnt === 1) {
-        start = i+1;
-      }
-    } else if (input[i] === ']') {
-      cnt--;
-      if (cnt === 0) {
-        let subRes = parseVector(input.substr(start, i - start));
-        if (subRes != null) {
-          result.push(subRes);
-				} else {
-					result.push([]);
-        }
-      }
-    }
-  }
-  if (result.length === 0) {
-    return input.split(/\s*,\s*/);
-  }
-  return result
+
+function parseObj(input) {
+	input = input.trim();
+	if (input[0] !== '[') return input;
+	let cnt = 0;
+	let pos = 0;
+	let result = [];
+	for (let i = 0; i < input.length; i++) {
+		if (input[i] === '[') cnt++;
+		else if (input[i] === ']') cnt--;
+		else if (input[i] === ',') {
+			if (cnt !== 1) continue;
+			let val = parseObj(input.substr(pos+1, i-pos-1))
+			if (val !== '') result.push(val);
+			pos = i;
+		}
+	}
+	let val = parseObj(input.substr(pos+1, input.length-pos-2))
+	if (val !== '') result.push(val);
+	return result;
+}
+
+function parseMultiVector(input) {
+	input = input.trim();
+	if (input === '') return null;
+	let range = [];
+	let start = 0;
+	let cnt = 0;
+	for (let i = 0; i < input.length; i++) {
+		if (input[i] === '[') {
+			cnt++;
+			if (cnt === 1) start = i;
+		}
+		if (input[i] === ']') {
+			cnt--;
+			if (cnt === 0) range.push([start, i]);
+		}
+	}
+	if (range.length === 1) return parseObj(input);
+	let result = [];
+	for (let i = 0; i < range.length; i++) {
+		let from = range[i][0];
+		let to = range[i][1];
+		result.push(parseObj(input.substr(from, to-from+1)))
+	}
+	return result;
+}
+
+function objToStr(obj) {
+	if( Object.prototype.toString.call( obj ) !== '[object Array]' ) {
+		return obj;
+	}
+	let result = '{';
+	for (let i = 0; i < obj.length; i++) {
+		if (i) result += ',';
+		result += objToStr(obj[i]);
+	}
+	result += '}';
+	return result;
 }
 
 function getFuncRunCode(func, inputArgs, expected, is_constructor) {
-    let codeContent = '\t{\n';
-    for (let i = 0; i < inputArgs.length; i++) {
-      let v = func.variables[i];
-      if (v.isVector) {
-        codeContent += '\t\t' + removeReference(v.type) + ' ' + v.name + ' = {' + inputArgs[i] + '};\n';
-      }
+  let codeContent = '\t{\n';
+  for (let i = 0; i < inputArgs.length; i++) {
+    let v = func.variables[i];
+    if (v.isVector) {
+      codeContent += '\t\t' + removeReference(v.type) + ' ' + v.name + ' = {' + inputArgs[i] + '};\n';
     }
-    codeContent += '\t\t';
-    if (is_constructor) {
-      codeContent += 'sol = new ';
-    } else if (func.outputVar.type) {
-      codeContent += removeReference(func.outputVar.type) + ' answer = sol->';
+  }
+  codeContent += '\t\t';
+  if (is_constructor) {
+    codeContent += 'sol = new ';
+  } else if (func.outputVar.type) {
+    codeContent += removeReference(func.outputVar.type) + ' answer = sol->';
+  } else {
+    codeContent += 'sol->';
+  }
+  codeContent += func.funcName + '(';
+  for (let i = 0; i < inputArgs.length; i++) {
+    if (i) codeContent += ', ';
+    let v = func.variables[i];
+    codeContent += (v.isVector ? v.name : inputArgs[i]);
+  }
+  codeContent += ');\n';
+  if (func.outputVar.type) {
+    codeContent += '\t\t' + removeReference(func.outputVar.type) + ' expected = ' + objToStr(expected) + ';\n';
+    if (func.outputVar.isVector) {
+      codeContent += '\t\tcout << "Expected: " << vecToStr(expected) << endl;\n';
+      codeContent += '\t\tcout << "Received: " << vecToStr(answer) << endl;\n';
     } else {
-      codeContent += 'sol->';
+      codeContent += '\t\tcout << "Expected: " << expected << endl;\n';
+      codeContent += '\t\tcout << "Received: " << answer << endl;\n';
     }
-    codeContent += func.funcName + '(';
-    for (let i = 0; i < inputArgs.length; i++) {
-      if (i) codeContent += ', ';
-      let v = func.variables[i];
-      codeContent += (v.isVector ? v.name : inputArgs[i]);
-    }
-    codeContent += ');\n';
-    if (func.outputVar.type) {
-      codeContent += '\t\t' + removeReference(func.outputVar.type) + ' expected = ' + expected + ';\n';
-      codeContent += '\t\tcout << "Expected: " << answer << endl;\n';
-      codeContent += '\t\tcout << "Received: " << expected << endl;\n';
-      codeContent += '\t\tcout << "Result: ";\n';
-      codeContent += '\t\tbool success = true;\n';
-      codeContent += '\t\tif (answer != expected) {\n';
-      codeContent += '\t\t\tcout << "Wrong Answer" << endl << endl;\n';
-      codeContent += '\t\t\tsuccess = false;\n';
-      codeContent += '\t\t} else {\n';
-      codeContent += '\t\t\tcout << "Correct!" << endl << endl;\n';
-      codeContent += '\t\t}\n';
-      codeContent += '\t\tallSuccess &= success;\n';
-    }
-    codeContent += '\t}\n';
-    return codeContent;
+    codeContent += '\t\tcout << "Result: ";\n';
+    codeContent += '\t\tbool success = true;\n';
+    codeContent += '\t\tif (answer != expected) {\n';
+    codeContent += '\t\t\tcout << "Wrong Answer" << endl << endl;\n';
+    codeContent += '\t\t\tsuccess = false;\n';
+    codeContent += '\t\t} else {\n';
+    codeContent += '\t\t\tcout << "Correct!" << endl << endl;\n';
+    codeContent += '\t\t}\n';
+    codeContent += '\t\tallSuccess &= success;\n';
+  }
+  codeContent += '\t}\n';
+  return codeContent;
 }
 
 function parseInputImplementClass(inout) {
-  let inputArr = parseVector(inout.input);
-  let outputArr = parseVector(inout.output);
+  let inputArr = parseMultiVector(inout.input);
+  let outputArr = parseMultiVector(inout.output);
   if (inputArr.length !== 2 || inputArr[0].length !== inputArr[1].length) {
     return '';
   }
@@ -640,7 +604,7 @@ function parseInputImplementClass(inout) {
   let codeContent = '';
   for (let i = 0; i < inputArr[0].length; i++) {
     let funcName = inputArr[0][i].replace(/"/g, '');
-    codeContent += getFuncRunCode(funcDict[funcName], inputArr[1][i], outputArr[0][i], i === 0);
+    codeContent += getFuncRunCode(funcDict[funcName], inputArr[1][i], outputArr[i], i === 0);
   }
   return codeContent;
 }
